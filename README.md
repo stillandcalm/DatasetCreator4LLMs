@@ -1,152 +1,183 @@
-# CrawlerAndDatasetCreator4DL
+# Crawler and Dataset Creator for Distributed LLM Training
 
-A fully parallelized web-crawler and data‑preparation pipeline for generating large-scale language-model training data, plus end‑to‑end scripts to fine‑tune and infer with LLaMA‑3 8B models using DeepSpeed.
+This repository automates the end-to-end pipeline for building a high-quality training dataset and fine-tuning a LLaMA-based model (e.g., LLaMA-3-8B) in a multi-node, multi-GPU environment.
 
-## Table of Contents
+---
 
-* [Prerequisites](#prerequisites)
-* [Installation](#installation)
-* [Directory Structure](#directory-structure)
-* [Data Preparation Pipeline](#data-preparation-pipeline)
-* [Training](#training)
-* [Inference](#inference)
-* [Tokenizer](#tokenizer)
-* [Extras](#extras)
+## 1. Setup & Prework
 
-## Prerequisites
-
-* Ubuntu 20.04+ or equivalent
-* Python 3.8+ with `venv`
-* NVIDIA GPU(s) with CUDA 11.8
-* `git` command line
-
-## Installation
+Before running the data pipeline or training, prepare your distributed cluster and environment as follows:
 
 ```bash
-# Clone and enter repo
-git clone git@github.com:stillandcalm/CrawlerandDatasetCreator4DL.git
-cd CrawlerandDatasetCreator4DL
+# On all nodes (master and slaves):
+# 1) Create a Python virtual environment
+python3 -m venv llama3
+source llama3/bin/activate
 
-# Create and activate venv
-python3 -m venv venv
-source venv/bin/activate
+# 2) Install system packages
+sudo apt update -y
+sudo apt install -y pdsh vim iputils-ping
 
-# Install Python dependencies
-pip install -r requirements.txt
+# 3) Enable SSH root login & restart
+sudo sed -i 's|^#\?\s*PermitRootLogin\s\+.*|PermitRootLogin yes|' /etc/ssh/sshd_config
+sudo sed -i 's|^#\?\s*PasswordAuthentication\s\+.*|PasswordAuthentication yes|' /etc/ssh/sshd_config
+sudo sed -i 's|^#\?\s*PermitEmptyPasswords\s\+.*|PermitEmptyPasswords no|' /etc/ssh/sshd_config
+sudo service ssh restart
+
+# 4) On master: generate and distribute SSH keys
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
+cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+data=(10.65.4.2 10.65.4.3)
+for ip in "${data[@]}"; do
+  ssh-copy-id -i ~/.ssh/id_ed25519.pub root@${ip}
+  ssh-keyscan -H ${ip} >> ~/.ssh/known_hosts
+done
+chmod 700 ~/.ssh && chmod 600 ~/.ssh/*
+
+# 5) Install Python dependencies
+pip install --upgrade pip
+pip install transformers accelerate datasets bitsandbytes sentencepiece protobuf huggingface-hub
+deps=(torch torchvision torchaudio deepspeed)
+pip uninstall -y ${deps[*]}
+pip install --upgrade --index-url https://download.pytorch.org/whl/cu118 torch torchvision torchaudio
+deepspeed
+
+# 6) Login to Hugging Face
+huggingface-cli login
+
+# 7) Configure NCCL for inter-node communication
+export NCCL_DEBUG=INFO
+export NCCL_SOCKET_IFNAME=eth1   # Adjust to your network interface
+export NCCL_IB_DISABLE=1          # Disable InfiniBand if not used
+export NCCL_P2P_LEVEL=NVL
+export MASTER_ADDR=10.65.4.2      # Master node IP
+export MASTER_PORT=29500
 ```
-#if you plan to use the llama tokenizer.model (recommended)
-huggingface-cli download meta-llama/Meta-Llama-3-8B --include "original/tokenizer.model" --local-dir your-destination-folder
 
+> **Source:** Detailed setup instructions from `setup.txt` citeturn6file0
 
-## Directory Structure
+---
+
+## 2. Repository Layout
 
 ```text
-.
-├── .gitignore               # Files/directories ignored by Git
-├── commandsequence.sh       # Orchestrates full pipeline + training + inference
-├── finalizedata.sh          # Runs just the data‑prep pipeline
-├── requirements.txt         # Python libraries
-├── cyber_keywords.txt       # Keywords for filtering extracted text
-├── domains.txt              # Allowed crawl domains
-├── seeds.txt                # Initial seed URLs for the crawler
-├── data/                    # Intermediate and final data shards
-├── extras/                  # Helper configs & scripts for distributed training
-│   ├── hostfile             # DeepSpeed hostfile template
-│   ├── NCCL.sh              # NCCL environment setup
-│   └── run_deepspeed.sh     # Wrapper for multi-node DeepSpeed launch
-├── inference/               # CLI script for model inference
-│   └── inference_cli.py
-├── tokenizer.model               # your tokenizer.model (use llama tokenizer)
-├── tokenizer/               # Tokenizer training and configuration
-│   ├── bpetokenizer.py      # Train a custom BPE tokenizer if you plan to use your own
-│   ├── special_tokens_map.json
-│   ├── tokencount.py        # Count tokens in raw text
-│   ├── tokenize_and_pack.py # Tokenize & pack into .seq files
-│   ├── tokenizer_config.json
-│   └── tokenizer.json       # SentencePiece model config
-├── train/                   # Fine‑tuning scripts & DeepSpeed settings
-│   ├── deepspeed_config.json
-│   ├── train_llama3_full_ft.py
-│   └── inference_llama3_ft.py
-└── scripts/                 # Parallelized data‑processing stages
-    ├── crawl_threaded.py    # Multi‑threaded web crawler
-    ├── extract_text.py      # HTML→plain‑text extraction
-    ├── filter_data.py       # Language detection & keyword filtering
-    ├── dedupe.py            # Fast deduplication (SHA‑256 hashing)
-    ├── scrub_pii.py         # PII detection & masking
-    ├── tokenize_and_pack.py # Tokenization + train/test packing by shard
-    └── count_tokens.py      # Token count verification per shard
+lion1b/                   # Project root
+├── data/                 # Intermediate & final data shards
+│   ├── raw_html_thread*.txt
+│   ├── extracted_thread*.txt
+│   ├── filtered_thread*.txt
+│   ├── deduped_thread*.txt
+│   ├── scrubbed_thread*.txt
+│   ├── train_thread*.seq
+│   ├── test_thread*.seq
+│   └── ...
+├── scripts/              # Parallelized data preprocessing scripts
+│   ├── crawl_threaded.py
+│   ├── extract_text.py
+│   ├── filter_data.py
+│   ├── dedupe.py
+│   ├── scrub_pii.py
+│   ├── tokenize_and_pack.py
+│   └── count_tokens.py
+├── finalizedata.sh        # Orchestrate full data prep pipeline
+├── parall.sh             # Alternate pipeline orchestration script
+├── commandsequence.sh    # Runs data, training, and inference end-to-end
+├── requirements.txt      # Python dependencies
+├── tokenizer/            # Optional: custom tokenizer tools
+└── train/                # Training & inference scripts
+    ├── deepspeed_config.json
+    ├── train_llama3_full_ft.py
+    └── inference_llama3_ft.py
 ```
 
-## Data Preparation Pipeline
+---
 
-To run the entire data pipeline (crawl → extract → filter → dedupe → scrub → tokenize):
+## 3. Data Preparation Pipeline
+
+### 3.1 Crawl the Web
+
+Run a multi-threaded crawler to partition your seed URLs across threads:
 
 ```bash
-./finalizedata.sh
+# Using finalize pipeline
+./finalizedata.sh            # Executes crawling + all downstream stages
+
+# Or manually:
+./parall.sh                  # Launches threaded crawl & parallel scripts
 ```
 
-`finalizedata.sh` invokes, in sequence:
+### 3.2 Extract Text
 
-1. **crawl\_threaded.py** — splits `seeds.txt` across threads; writes `data/raw_html_thread*.txt`
-2. **extract\_text.py** — strips HTML tags; outputs `data/extracted_thread*.txt`
-3. **filter\_data.py** — retains lines in target language containing `cyber_keywords.txt`; writes `data/filtered_thread*.txt`
-4. **dedupe.py** — SHA‑256 dedupe; writes `data/deduped_thread*.txt`
-5. **scrub\_pii.py** — masks/removes PII; writes `data/scrubbed_thread*.txt`
-6. **tokenize\_and\_pack.py** — applies SentencePiece tokenizer; packs into `data/train_thread*.seq` and `data/test_thread*.seq`
-7. **count\_tokens.py** — reports token counts to verify even sharding
-
-Intermediate and final shards all live under `data/`.
-
-## Training
-
-Example DeepSpeed multi‑node launch using the helper script:
+Strips HTML into plaintext per shard:
 
 ```bash
-bash extras/run_deepspeed.sh \
-  --model meta-llama/Llama-3-8B \
-  --data-dir data/ \
-  --output-dir output/llama3-8b-ft
+bash >> scripts/extract_text.py --input data/raw_html_thread$T.txt \
+    --output data/extracted_thread$T.txt --threads 4 --part-id $T --num-parts 8
 ```
 
-Alternatively, you can call the training script directly:
+### 3.3 Filter & Clean
+
+* **filter\_data.py:** language detection & keyword filter
+* **dedupe.py:** fast SHA256 deduplication
+* **scrub\_pii.py:** remove/mask PII
+
+Each runs in parallel across shards.
+
+### 3.4 Tokenize & Pack
+
+Uses SentencePiece model to split into fixed-length sequences:
 
 ```bash
-deepspeed train/train_llama3_full_ft.py \
+python scripts/tokenize_and_pack.py \
+  --input data/scrubbed_thread$T.txt \
+  --model tokenizer.model \
+  --seq_len 4096 \
+  --train_out data/train_thread$T.seq \
+  --test_out data/test_thread$T.seq \
+  --part-id $T --num-parts 8
+```
+
+Verify token counts with `count_tokens.py`:
+
+```bash
+python scripts/count_tokens.py --input data/train_thread$T.seq \
+  --part-id $T --num-parts 8
+```
+
+---
+
+## 4. Fine-tuning
+
+Launch distributed training via DeepSpeed:
+
+```bash
+# On master node:
+deepseed --hostfile extras/hostfile \
+  train/train.py \
   --model_name_or_path meta-llama/Llama-3-8B \
-  --train_file data/train.jsonl \
-  --deepspeed train/deepspeed_config.json
+  --train_file data/train_thread*.seq \
+  --output_dir output/ll3-8b-ft \
+  --deepspeed train/deepspeed_config.json \
+  --per_device_train_batch_size 1 \
+  --gradient_accumulation_steps 16 \
+  --num_train_epochs 5 \
+  --learning_rate 5e-5 \
+  --max_seq_length 4096
 ```
 
-After training you can package the model for inference via `train/inference_llama3_ft.py`.
+> **Tip:** Replace `--train_file` glob with a JSONL manifest if needed by `datasets` loader.
 
-## Inference
+---
 
-Once a fine‑tuned model is saved to `output/llama3-8b-ft`, run:
+## 5. Inference
+
+After fine-tuning, run inference:
 
 ```bash
 python inference/inference_cli.py \
-  --model_dir output/llama3-8b-ft \
-  --prompt "Your question here"
+  --model output/ll3-8b-ft \
+  --prompt "Hello, world!" \
+  --max_length 200
 ```
 
-## Tokenizer
-
-* **Train a custom tokenizer** from your corpus:
-
-  ```bash
-  python tokenizer/bpetokenizer.py \
-    --input data/scrubbed.txt \
-    --model_out tokenizer/tokenizer.model
-  ```
-* **Reuse HF LLaMA‑3 tokenizer**:
-
-  ```bash
-  python scripts/get_llama3-8b_tokenizer.py
-  ```
-
-## Extras
-
-* `extras/hostfile` — configure multi‑node hosts
-* `extras/NCCL.sh` — set NCCL environment variables
-* `extras/run_deepspeed.sh` — example DeepSpeed launcher wrapper
+---
