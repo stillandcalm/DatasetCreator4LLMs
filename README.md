@@ -1,78 +1,91 @@
- High-level walk-through of how each of those key intermediate files gets produced:
+# Crawler and Dataset Creator for LLM training (README)
 
-  $python scripts/crawl.py   --seeds   seeds.txt   --domains domains.txt   --out     data/raw_html.txt
-  extracted.txt
-      $python scripts/extract_text.py
+## Overview
 
-      Input: data/raw_html.txt (your raw crawler dump, with URL: / ---ENDDOC--- markers)
+This repository provides a scalable, parallelized data collection and preprocessing pipeline, along with training and inference orchestration for cybersecurity-focused language models. The core components are two Bash scripts that automate the workflow:
 
-      What it does:
-        Reads in one raw-HTML document at a time (splitting on the URL: and ---ENDDOC--- markers).
-        Feeds the HTML blob to Trafilatura to strip out boilerplate and extract the main textual content.
-        Writes each cleaned text chunk back-to-back, separated by ---ENDDOC---.
-        Result: a plaintext file where each “document” is just the extracted body text, ready for filtering.
+1. **`finalizedata.sh`**: Cleans, filters, deduplicates, and tokenizes raw HTML data into training and test sequences. citeturn5file2
+2. **`commandsequence.sh`**: Runs the data finalization, model training, and inference steps in sequence. citeturn5file0
 
-  filtered.txt
-        
-      $python scripts/filter_data.py
-      Input: data/extracted.txt
+## Prerequisites
 
-      What it does:
-        Splits on ---ENDDOC--- to recover individual documents.
-        Length filter: drops anything under a minimum word count (e.g. 100 tokens).
-        Language filter: uses langdetect to drop non-English docs.
-        Keyword filter: keeps only docs containing at least one term from your cyber_keywords.txt list (e.g. “malware,” “CVE,” “ransomware,” etc.).
-        Writes each passing document as a single block (no markers) to data/filtered.txt.
-        Result: security-focused English documents of reasonable length.
+* Unix-like shell (`bash`)
+* Python 3 with required packages:
 
-  deduped.txt
-      $python scripts/dedupe.py
-      Input: data/filtered.txt
+  ```bash
+  pip install -r requirements.txt
+  ```
+* SentencePiece model file (`tokenizer.model`) built or downloaded for your desired tokenizer.
+* Seeds (`seeds.txt`) and domain list (`domains.txt`) files.
 
-      What it does:
-        Reads each line/document.
-        Builds a MinHash signature over its word set (using datasketch.MinHash).
-        Uses an LSH index to detect any prior document whose Jaccard similarity ≥ 0.8.
-        If no near-duplicate is found, it inserts this doc’s MinHash into the index and writes the doc to data/deduped.txt.
-      Result: one copy of each “unique” document, with near-duplicates removed.
+## Scripts
 
-  all.txt
-      Command:
-        # From your project root
-        grep -v '^$' data/scrubbed.txt > data/all.txt
-        Inputs: data/scrubbed.txt (your PII-scrubbed docs, one per line)
+### 1. `finalizedata.sh`
 
-      What it does:
-        Strips out any blank lines (so SentencePiece doesn’t see empty sentences).
-        Concatenates all remaining lines into one large file.
-      Result: a single “corpus” file ready to train your BPE tokenizer.
+This script orchestrates the data preprocessing pipeline over **$NUM_SHARDS$** parallel shards:
 
-# then run the tokenizer
-python scripts/bpetokenizer.py
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
 
+# Configuration variables
+NUM_SHARDS=8             # number of parallel pieces
+WORKERS=4                # multiprocessing workers
+SEEDS=seeds.txt
+DOMAINS=domains.txt
+OUTDIR=data
+KEYWORDS=cyber_keywords.txt
+SPM_MODEL=tokenizer.model # LLaMA-3-8B tokenizer.model
+SEQ_LEN=4096             # sequence length
+TRAIN_FRAC=0.9           # train/test split fraction
 
-Putting it all together:
+# Helper to print counts for file globs
+print_counts(){
+  local stage=$1
+  local glob=$2
+  echo
+  echo "=== ${stage} counts ==="
+  printf  " shard |   lines |    bytes\n"
+  printf  "-------:|--------:|--------:\n"
+  for path in ${OUTDIR}/${glob}; do
+    [[ -e $path ]] || continue
+    shard=$(basename $path | grep -o '[0-9]\+')
+    l=$(wc -l <"$path" 2>/dev/null || echo 0)
+    b=$(wc -c <"$path" 2>/dev/null || echo 0)
+    printf "   %2s   | %7s | %7s\n" "$shard" "$l" "$b"
+  done
+}
+```
 
-raw_html.txt
-   └── extract_text.py  ──▶ extracted.txt
-   └── filter_data.py   ──▶ filtered.txt
-   └── dedupe.py        ──▶ deduped.txt
-   └── scrub_pii.py     ──▶ scrubbed.txt
-grep to all.txt               ──▶ all.txt
+**Pipeline stages:**
 
+1. **Crawl**: Fetch raw HTML pages in parallel threads. Writes `raw_html_threadN.txt` citeturn5file5.
+2. **Extract Text**: Use `scripts/extract_text.py` to extract clean text from HTML shards. Writes `extracted_threadN.txt` citeturn5file4
+3. **Filter Data**: `scripts/filter_data.py` applies language detection and keyword filtering. Writes `filtered_threadN.txt` citeturn5file4.
+4. **Deduplicate**: Remove duplicate content via SHA256 hashing. Writes `deduped_threadN.txt` citeturn5file4.
+5. **Scrub PII**: `scripts/scrub_pii.py` masks or removes personally identifiable information. Writes `scrubbed_threadN.txt` citeturn5file2.
+6. **Tokenize and Pack**: `scripts/tokenize_and_pack.py` uses the SentencePiece model to tokenize, split into train/test, and produce `train_threadN.seq` and `test_threadN.seq` citeturn5file2.
+7. **Count Tokens**: `scripts/count_tokens.py` reports token counts per shard and grand total. Optionally reshards to equalize token budgets.
 
+To run data finalization:
 
-############### Get the LLAMA3-8B tokenizer.model file 
-huggingface-cli download meta-llama/Meta-Llama-3-8B --include "original/tokenizer.model" --local-dir lion1b
-#############Get and process data to tokenized train and test set #############
+```bash
+sh finalizedata.sh
+```
+
+### 2. `commandsequence.sh`
+
+This script ties together data finalization, training, and inference:
+
+```bash
+# Run data finalization pipeline
 sh finalizedata.sh
 
-#######Incremental Distributed FineTuning of Llama-3-8B basemodel. Follow the scripts in the other tutorial on github######
+# Training
 sh trainingcommand.sh
 
-###########inferencing###############
-#option 1
-# With explicit prompt
+# Inference examples
 python scripts/inference_cli.py \
   --model_dir output/ll3-8b-ft \
   --prompt "Explain the MITRE ATT&CK framework." \
@@ -80,12 +93,7 @@ python scripts/inference_cli.py \
   --temperature 0.7 \
   --top_k 50 \
   --top_p 0.95
-#option 2: commandline
+```
 
-#echo "What are the benefits of zero-trust architecture?" | \
-#  python scripts/inference_cli.py \
-#    --model_dir output/ll3-8b-ft \
-#    --max_new_tokens 150
-
-
-
+* **Training (`trainingcommand.sh`)**: invokes `train.py` or `deepspeed train.py` with appropriate flags.
+* **Inference (`inference_cli.py`)**: Provides a command-line interface to load the fine-tuned model and generate text.

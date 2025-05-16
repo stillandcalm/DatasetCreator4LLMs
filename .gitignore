@@ -4,3 +4,4 @@ data/
 *.swp
 tokenizer.model
 tokenizer.model
+Meta-Llama-3-8B/original/tokenizer.model
