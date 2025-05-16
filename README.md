@@ -6,7 +6,7 @@ This repository automates the end-to-end pipeline for building a high-quality tr
 
 ## 1. Setup & Prework
 
-NOTE: Using two ip addresses as an example: 
+NOTE: Using two ip addresses as an example: 10.65.4.2 10.65.4.3 
 Before running the data pipeline or training, prepare your distributed cluster and environment as follows:
 
 ```bash
