@@ -6,6 +6,7 @@ This repository automates the end-to-end pipeline for building a high-quality tr
 
 ## 1. Setup & Prework
 
+NOTE: Using two ip addresses as an example: 
 Before running the data pipeline or training, prepare your distributed cluster and environment as follows:
 
 ```bash
@@ -54,7 +55,7 @@ export MASTER_ADDR=10.65.4.2      # Master node IP
 export MASTER_PORT=29500
 ```
 
-> **Source:** Detailed setup instructions from `setup.txt` citeturn6file0
+> **Source:** Detailed setup instructions from `setup.txt` citeturn6file0
 
 ---
 
