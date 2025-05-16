@@ -55,7 +55,7 @@ export MASTER_ADDR=10.65.4.2      # Master node IP
 export MASTER_PORT=29500
 ```
 
-> **Source:** Detailed setup instructions from `setup.txt` citeturn6file0
+> **Source:** Detailed setup instructions from `setup.txt`
 
 ---
 
