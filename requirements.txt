@@ -1,0 +1,22 @@
+# crawling & extraction
+requests
+beautifulsoup4
+trafilatura
+langdetect
+# dedupe
+datasketch
+# PII scrubbing (no extra deps)
+# tokenizer training & packing
+sentencepiece
+tqdm 
+# training
+torch
+transformers
+# optional for large‐scale / ZeRO
+deepspeed
+accelerate
+datasketch
+aiohttp
+aiofiles
+lxml
+

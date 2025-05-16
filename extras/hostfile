@@ -1,0 +1,5 @@
+# extras/hostfile
+# format: <IP_or_hostname> slots=<num_gpus>
+10.65.4.2 slots=4
+10.65.4.3 slots=4
+
