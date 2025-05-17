@@ -138,27 +138,9 @@ Under `train/` you have:
 **Example:**
 
 ```bash
-deepspeed --hostfile hostfile train/train_llama3_full_ft.py \
-  --model_name_or_path meta-llama/Meta-Llama-3-8B \
-  --train_sequences data/train_thread*.seq \
-  --output_dir output/ll3-8b-ft \
-  --deepspeed deepspeed_config.json \
-  --per_device_train_batch_size 1 \
-  --gradient_accumulation_steps 16 \
-  --max_train_tokens 300000000000 \
-  --logging_steps 100
-
-```
-
----
-
-## Inference
-
-Once saved, convert checkpoint to HF format:
-
-```bash
 
 deepspeed_config.json
+
 {
   "zero_optimization": {
     "stage": 2
@@ -179,6 +161,25 @@ deepspeed_config.json
   }
 }
 
+deepspeed --hostfile hostfile train/train_llama3_full_ft.py \
+  --model_name_or_path meta-llama/Meta-Llama-3-8B \
+  --train_sequences data/train_thread*.seq \
+  --output_dir output/ll3-8b-ft \
+  --deepspeed deepspeed_config.json \
+  --per_device_train_batch_size 1 \
+  --gradient_accumulation_steps 16 \
+  --max_train_tokens 300000000000 \
+  --logging_steps 100
+
+```
+
+---
+
+## Inference
+
+Once saved, convert checkpoint to HF format:
+
+```bash
 python train/modelcreate.py \
   --checkpoint output/ll3-8b-ft/checkpoint-xxx \
   --out_dir inference/llama3-8b-ft
