@@ -1,10 +1,8 @@
-# train_llama3_full_ft.py
 #!/usr/bin/env python3
 import argparse
 import logging
 import os
 import torch
-import re
 from torch.utils.data import IterableDataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 from transformers import AutoTokenizer, LlamaForCausalLM
@@ -41,16 +39,22 @@ def collate_fn(batch):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Full fine-tune LLaMA-3-8B with DeepSpeed + infinite data")
+    parser = argparse.ArgumentParser(
+        description="Full fine-tune LLaMA-3-8B with DeepSpeed + infinite data"
+    )
     parser.add_argument("--model_name_or_path", type=str, required=True)
-    parser.add_argument("--train_sequences", type=str, required=True,
-                        help="Path to packed seq file (4096-token lines)")
+    parser.add_argument(
+        "--train_sequences", type=str, required=True,
+        help="Path to packed seq file (4096-token lines)"
+    )
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--deepspeed_config", type=str, required=True)
     parser.add_argument("--per_device_train_batch_size", type=int, default=1)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=16)
-    parser.add_argument("--max_train_tokens", type=int, default=300_000_000_000,
-                        help="Total tokens to train on (e.g. 300B)")
+    parser.add_argument(
+        "--max_train_tokens", type=int, default=300_000_000_000,
+        help="Total tokens to train on (e.g. 300B)"
+    )
     parser.add_argument("--learning_rate", type=float, default=5e-5)
     parser.add_argument("--logging_steps", type=int, default=100)
     parser.add_argument("--num_workers", type=int, default=2)
@@ -63,13 +67,15 @@ def main():
     logger.info(f"Using DeepSpeed: {_has_deepspeed}")
 
     # 1) Tokenizer & Model
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.model_name_or_path, use_fast=True
+    )
     if tokenizer.pad_token_id is None:
         tokenizer.add_special_tokens({"pad_token": tokenizer.eos_token})
     model = LlamaForCausalLM.from_pretrained(
         args.model_name_or_path,
         torch_dtype=torch.float16,
-        low_cpu_mem_usage=True,
+        low_cpu_mem_usage=True
     )
     model.config.pad_token_id = tokenizer.pad_token_id
     model.gradient_checkpointing_enable()
@@ -80,18 +86,19 @@ def main():
         ds,
         batch_size=args.per_device_train_batch_size,
         collate_fn=collate_fn,
-        num_workers=args.num_workers,
+        num_workers=args.num_workers
     )
 
-    # 3) Optimizer
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
-
-    # 4) DeepSpeed initialization
+    # 3+4) DeepSpeed initialization (let DS create optimizer from JSON)
     if _has_deepspeed:
         model, optimizer, _, _ = deepspeed.initialize(
-            config=args.deepspeed_config,
+            args=args,
             model=model,
-            model_parameters=model.parameters(),
+            model_parameters=model.parameters()
+        )
+    else:
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=args.learning_rate
         )
 
     # 5) Training loop by token count
@@ -107,15 +114,19 @@ def main():
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
+
         # count tokens = batch_size * seq_len
         B, T = batch["input_ids"].size()
         tokens_processed += B * T
 
         if step % args.logging_steps == 0:
-            logger.info(f"Step {step} | Tokens {tokens_processed:,}/{args.max_train_tokens:,} | Loss {loss.item():.4f}")
+            logger.info(
+                f"Step {step} | Tokens {tokens_processed:,}/{args.max_train_tokens:,} | "
+                f"Loss {loss.item():.4f}"
+            )
 
         if tokens_processed >= args.max_train_tokens:
-            logger.info(f"Reached target tokens. Exiting training loop.")
+            logger.info("Reached target tokens. Exiting training loop.")
             break
 
     # 6) Save checkpoint
@@ -125,9 +136,12 @@ def main():
         if _has_deepspeed:
             model.save_checkpoint(args.output_dir)
         else:
-            model.save_pretrained(args.output_dir, safe_serialization=True)
+            model.save_pretrained(
+                args.output_dir, safe_serialization=True
+            )
             tokenizer.save_pretrained(args.output_dir)
         logger.info(f"Saved model to {args.output_dir}")
+
 
 if __name__ == "__main__":
     main()
