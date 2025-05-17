@@ -112,6 +112,9 @@ This will:
 
 All intermediate files live in `data/`. You can inspect per‐thread stats in the final summary table.
 
+Download Llama-3-8B tokenizer.model from huggingface.
+huggingface-cli download meta-llama/Meta-Llama-3-8B --include "original/tokenizer.model" --local-dir .
+
 ---
 
 ## Fine‑Tuning
