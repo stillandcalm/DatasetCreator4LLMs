@@ -196,15 +196,9 @@ deepspeed_config.json (for single A100 env). For multi GPU based training use th
   }
 }
 
-deepspeed --hostfile hostfile train/train_llama3_full_ft.py \
-  --model_name_or_path meta-llama/Meta-Llama-3-8B \
-  --train_sequences data/train_thread*.seq \
-  --output_dir output/ll3-8b-ft \
-  --deepspeed deepspeed_config.json \
-  --per_device_train_batch_size 1 \
-  --gradient_accumulation_steps 16 \
-  --max_train_tokens 300000000000 \
-  --logging_steps 100
+deepspeed --hostfile hostfile train/train_llama3_full_ft.py   --model_name_or_path meta-llama/Meta-Llama-3-8B   --train_sequences data/train_thread*.seq   --output_dir output/ll3-8b-ft   --deepspeed deepspeed_config.json   --per_device_train_batch_size 1   --gradient_accumulation_steps 16   --max_train_tokens 12800   --logging_steps 100
+
+Kept max_train_tokens to small number to demo fast.
 
 ```
 
