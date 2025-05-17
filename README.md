@@ -91,14 +91,21 @@ This repository provides a complete end‑to‑end pipeline for:
 All preprocessing is driven by `finalizedata.sh`:
 
 ```bash
+#Download the DatasetCreator4LLMs repo
+git clone https://github.com/stillandcalm/DatasetCreator4LLMs.git
+
 #Download Llama-3-8B tokenizer.model from huggingface.
 huggingface-cli download meta-llama/Meta-Llama-3-8B --include "original/tokenizer.model" --local-dir .
+cd DatasetCreator4LLMs/
+pip install -r requirements.txt
+cp ../original/tokenizer.model .
+mkdir data
 
 ./finalizedata.sh \
   --seeds seeds.txt \
   --domains domains.txt \
   --output-dir data \
-  --threads 8 \
+  --threads 1 \
   --max-pages 100000 \
   --delay 1.0
 ```
