@@ -52,37 +52,61 @@ This repository provides a complete end‑to‑end pipeline for:
 ---
 
 ## Setup (Multi‑Node SSH & Environment)
+##node0(master) node1(slave)
+passwd 
+cd /root
+python3 -m venv llama3
+source llama3/bin/activate
 
-1. **On both nodes:**
+apt update -y
+apt install -y pdsh
+apt-get install vim
+apt-get install -y iputils-ping
 
-   ```bash
-   sudo apt update && sudo apt install -y pdsh sshpass
-   ssh-keygen -t ed25519
-   # Append public key to ~/.ssh/authorized_keys
-   ```
-2. **Configure SSH & network:**
+sed -i 's|^#\?\s*PermitRootLogin\s\+.*|PermitRootLogin yes|' /etc/ssh/sshd_config
+sed -i 's|^#\?\s*PasswordAuthentication\s\+.*|PasswordAuthentication yes|' /etc/ssh/sshd_config
+sed -i 's|^#\?\s*PermitEmptyPasswords\s\+.*|PermitEmptyPasswords no|' /etc/ssh/sshd_config
+service ssh restart
 
-   ```bash
-   # On master:
-   ssh-copy-id root@10.65.4.3
-   # On both nodes:
-   ssh-keyscan -H 10.65.4.2 >> ~/.ssh/known_hosts
-   ssh-keyscan -H 10.65.4.3 >> ~/.ssh/known_hosts
-   ```
-3. **Activate Python venv & install deps:**
+#node0
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ""
+cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+ssh-copy-id -i ~/.ssh/id_ed25519.pub root@10.65.0.3On 
 
-   ```bash
-   python3 -m venv venv && source venv/bin/activate
-   pip install -r requirements.txt
-   ```
-4. **Set NCCL & DeepSpeed ENV vars:**
+#node0 node1
+ssh-keyscan -H 10.65.4.2 >> ~/.ssh/known_hosts
+ssh-keyscan -H 10.65.4.3 >> ~/.ssh/known_hosts
 
-   ```bash
-   export MASTER_ADDR=10.65.4.2
-   export MASTER_PORT=29500
-   export NCCL_SOCKET_IFNAME=eth1
-   export NCCL_IB_DISABLE=1
-   ```
+#on node0
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/id_ed25519 ~/.ssh/id_ed25519.pub
+
+#Test 
+ssh root@ip-address-of-node0  # local (master)
+ssh root@ip-address-of-node1  # remote (slave)
+
+pip install transformers accelerate datasets bitsandbytes sentencepiece protobuf huggingface-hub
+python3 -c "import sentencepiece; print(sentencepiece.__version__)"
+python3 -c "import google.protobuf; print(google.protobuf.__version__)"
+
+which python    # should be something like /root/llama3/bin/python
+which pip       # should point under /root/llama3/bin/pip
+
+huggingface-cli login
+
+export NCCL_DEBUG=INFO
+export NCCL_SOCKET_IFNAME=eth1   # <— your real inter-node interface
+export NCCL_IB_DISABLE=1   # disable InfiniBand
+export NCCL_P2P_LEVEL=NVL  # optionally force NVL-level P2P (can help on multi-GPU NICs)
+export MASTER_ADDR=10.65.4.2  # The master node’s IP address
+export MASTER_PORT=29500
+#export NCCL_DEBUG=WARN
+
+pip uninstall -y torch torchvision torchaudio deepspeed
+pip install --upgrade --index-url https://download.pytorch.org/whl/cu118 torch torchvision torchaudio
+python3 -c "import torch; print(torch.__version__, torch.version.cuda)"
+pip install deepspeed
 
 ---
 
