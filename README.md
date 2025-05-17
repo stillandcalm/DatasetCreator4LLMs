@@ -166,7 +166,7 @@ Under `train/` you have:
 
 ```bash
 
-deepspeed_config.json
+deepspeed_config.json (for single A100 env). For multi GPU based training use the config file defined in my multi-node project
 
 {
   "zero_optimization": {
