@@ -91,6 +91,9 @@ This repository provides a complete end‑to‑end pipeline for:
 All preprocessing is driven by `finalizedata.sh`:
 
 ```bash
+#Download Llama-3-8B tokenizer.model from huggingface.
+huggingface-cli download meta-llama/Meta-Llama-3-8B --include "original/tokenizer.model" --local-dir .
+
 ./finalizedata.sh \
   --seeds seeds.txt \
   --domains domains.txt \
