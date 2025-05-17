@@ -58,7 +58,6 @@ def main():
     parser.add_argument("--learning_rate", type=float, default=5e-5)
     parser.add_argument("--logging_steps", type=int, default=100)
     parser.add_argument("--num_workers", type=int, default=2)
-    # DeepSpeed launcher will inject local_rank
     parser.add_argument("--local_rank", type=int, default=-1)
     args = parser.parse_args()
 
@@ -80,13 +79,18 @@ def main():
     model.config.pad_token_id = tokenizer.pad_token_id
     model.gradient_checkpointing_enable()
 
+    # Move model to GPU
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.to(device)
+
     # 2) Data loader (infinite stream)
     ds = SequenceStream(args.train_sequences)
     loader = DataLoader(
         ds,
         batch_size=args.per_device_train_batch_size,
         collate_fn=collate_fn,
-        num_workers=args.num_workers
+        num_workers=args.num_workers,
+        pin_memory=True
     )
 
     # 3+4) DeepSpeed initialization (let DS create optimizer from JSON)
@@ -105,6 +109,9 @@ def main():
     model.train()
     tokens_processed = 0
     for step, batch in enumerate(loader, start=1):
+        # move batch to same device as model
+        batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
+
         outputs = model(**batch)
         loss = outputs.loss
         if _has_deepspeed:
@@ -115,7 +122,6 @@ def main():
             optimizer.step()
             optimizer.zero_grad()
 
-        # count tokens = batch_size * seq_len
         B, T = batch["input_ids"].size()
         tokens_processed += B * T
 
@@ -141,7 +147,6 @@ def main():
             )
             tokenizer.save_pretrained(args.output_dir)
         logger.info(f"Saved model to {args.output_dir}")
-
 
 if __name__ == "__main__":
     main()
