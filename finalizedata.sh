@@ -1,142 +1,151 @@
 #!/usr/bin/env bash
 set -euo pipefail
-IFS=$'\n\t'
 
-# ─── CONFIG ────────────────────────────────────────────────────────────────────
-NUM_SHARDS=8             # number of parallel pieces
-WORKERS=4                # for CPU‐bound stages
-MAX_PAGES=100000         # crawler limit
-DELAY=1.0                # politeness
-CONCURRENCY=20           # asyncio fetch concurrency
+# —————————————————————————————————————
+# CONFIGURATION
+THREADS=${THREADS:-1}
+MAX_PAGES=${MAX_PAGES:-100000}
+DELAY=${DELAY:-1.0}
+SEEDS="seeds.txt"
+DOMAINS="domains.txt"
+DATA_DIR="data"
+KEYWORDS="cyber_keywords.txt"
+TOKENIZER_DIR="tokenizer"    # <— your local folder with tokenizer.json etc.
+SEQ_LEN=64
+# —————————————————————————————————————
 
-SEEDS=seeds.txt
-DOMAINS=domains.txt
-OUTDIR=data
-KEYWORDS=cyber_keywords.txt
+mkdir -p "${DATA_DIR}"
 
-SPM_MODEL=tokenizer.model    # your SentencePiece model
-SEQ_LEN=4096
-TRAIN_FRAC=0.9               # per-shard train/test split
+echo "=== Preflight: install HTML-clean + extraction deps ==="
+pip install --quiet lxml-html-clean trafilatura justext
 
-# ─── helper to print counts for a file‐glob ────────────────────────────────────
-print_counts(){
-  local stage=$1
-  local glob=$2
-
+print_counts() {
+  local prefix=$1 label=$2
   echo
-  echo "=== ${stage} counts ==="
-  printf  " shard |   lines |    bytes\n"
-  printf  "-------:|--------:|--------:\n"
-  for path in ${OUTDIR}/${glob}; do
-    [[ -e $path ]] || continue
-    shard=$(basename $path | grep -o '[0-9]\+')
-    l=$(wc -l <"$path" 2>/dev/null || echo 0)
-    b=$(wc -c <"$path" 2>/dev/null || echo 0)
-    printf "   %2s   | %7s | %7s\n" "$shard" "$l" "$b"
+  echo "=== ${label} counts ==="
+  printf -- " shard |   lines |    bytes\n"
+  printf -- "------:|--------:|--------:\n"
+  for SHARD in $(seq 0 $((THREADS-1))); do
+    local f="${DATA_DIR}/${prefix}_thread${SHARD}.txt"
+    if [[ -f $f ]]; then
+      LINES=$(wc -l < "$f" | xargs)
+      BYTES=$(wc -c < "$f" | xargs)
+    else
+      LINES=0; BYTES=0
+    fi
+    printf -- "%6d | %7d | %8d\n" "$SHARD" "$LINES" "$BYTES"
   done
-  echo
 }
 
-# ─── 1) crawl_threaded.py ─────────────────────────────────────────────────────
+echo
 echo "=== 1) Threaded crawl (per-thread raw_html) ==="
 python3 scripts/crawl_threaded.py \
-  --seeds       "$SEEDS" \
-  --domains     "$DOMAINS" \
-  --output-dir  "$OUTDIR" \
-  --threads     "$NUM_SHARDS" \
-  --max-pages   "$MAX_PAGES" \
-  --delay       "$DELAY" \
-  --concurrency "$CONCURRENCY"
-print_counts "raw_html" "raw_html_thread*.txt"
+  --seeds      "${SEEDS}" \
+  --domains    "${DOMAINS}" \
+  --output-dir "${DATA_DIR}" \
+  --threads    "${THREADS}" \
+  --max-pages  "${MAX_PAGES}" \
+  --delay      "${DELAY}"
 
-# ─── 2) extract_text.py ───────────────────────────────────────────────────────
-echo "=== 2) Parallel extract_text ==="
-for ((i=0;i<NUM_SHARDS;i++)); do
-  python3 scripts/extract_text.py \
-    --input     "${OUTDIR}/raw_html_thread${i}.txt" \
-    --output    "${OUTDIR}/extracted_thread${i}.txt" \
-    --workers   "$WORKERS" \
-    --part-id   "$i" \
-    --num-parts "$NUM_SHARDS" &
-done
-wait
-print_counts "extracted" "extracted_thread*.txt"
-
-# ─── 3) filter_data.py ────────────────────────────────────────────────────────
-echo "=== 3) Parallel filter_data ==="
-for ((i=0;i<NUM_SHARDS;i++)); do
-  python3 scripts/filter_data.py \
-    --input     "${OUTDIR}/extracted_thread${i}.txt" \
-    --output    "${OUTDIR}/filtered_thread${i}.txt" \
-    --keywords  "$KEYWORDS" \
-    --min-len   100 \
-    --workers   "$WORKERS" \
-    --part-id   "$i" \
-    --num-parts "$NUM_SHARDS" &
-done
-wait
-print_counts "filtered" "filtered_thread*.txt"
-
-# ─── 4) dedupe.py (sha256) ────────────────────────────────────────────────────
-echo "=== 4) Parallel dedupe ==="
-for ((i=0;i<NUM_SHARDS;i++)); do
-  python3 scripts/dedupe.py \
-    --input     "${OUTDIR}/filtered_thread${i}.txt" \
-    --output    "${OUTDIR}/deduped_thread${i}.txt" \
-    --part-id   "$i" \
-    --num-parts "$NUM_SHARDS" &
-done
-wait
-print_counts "deduped" "deduped_thread*.txt"
-
-# ─── 5) scrub_pii.py ──────────────────────────────────────────────────────────
-echo "=== 5) Parallel scrub_pii ==="
-for ((i=0;i<NUM_SHARDS;i++)); do
-  python3 scripts/scrub_pii.py \
-    --input     "${OUTDIR}/deduped_thread${i}.txt" \
-    --output    "${OUTDIR}/scrubbed_thread${i}.txt" \
-    --workers   "$WORKERS" \
-    --part-id   "$i" \
-    --num-parts "$NUM_SHARDS" &
-done
-wait
-print_counts "scrubbed" "scrubbed_thread*.txt"
-
-# ─── 6) tokenize_and_pack.py ─────────────────────────────────────────────────
-echo "=== 6) Parallel tokenize_and_pack ==="
-for ((i=0;i<NUM_SHARDS;i++)); do
-  python3 scripts/tokenize_and_pack.py \
-    --input      "${OUTDIR}/scrubbed_thread${i}.txt" \
-    --model      "$SPM_MODEL" \
-    --seq_len    "$SEQ_LEN" \
-    --train-out  "${OUTDIR}/train_thread${i}.seq" \
-    --test-out   "${OUTDIR}/test_thread${i}.seq" \
-    --part-id    "$i" \
-    --num-parts  "$NUM_SHARDS" \
-    --train-frac "$TRAIN_FRAC" &
-done
-wait
-print_counts "train_sequences" "train_thread*.seq"
-print_counts "test_sequences " "test_thread*.seq"
-
-# ─── 7) count_tokens.py ───────────────────────────────────────────────────────
-echo "=== 7) Count tokens per shard and total ==="
-grand=0
-for ((i=0;i<NUM_SHARDS;i++)); do
-  cnt=$(python3 scripts/count_tokens.py \
-    --input     "${OUTDIR}/train_thread${i}.seq" \
-    --part-id   "$i" \
-    --num-parts "$NUM_SHARDS")
-  printf " Shard %2d: %6d tokens\n" "$i" "$cnt"
-  (( grand += cnt ))
-done
-echo "---------------------------------"
-echo " Grand total tokens: $grand"
+print_counts raw_html "raw_html"
 
 echo
-echo "=== 8) Re-shard into balanced token shards ==="
-python3 scripts/reshard_by_tokens.py \
-  --input-glob   "data/train_thread*.seq" \
-  --output-prefix "data/train_balanced_" \
-  --num-shards   "$NUM_SHARDS"
+echo "=== 2) Parallel extract_text ==="
+for SHARD in $(seq 0 $((THREADS-1))); do
+  python3 scripts/extract_text.py \
+    --input     "${DATA_DIR}/raw_html_thread${SHARD}.txt" \
+    --output    "${DATA_DIR}/extracted_thread${SHARD}.txt" \
+    --workers   "${THREADS}" \
+    --part-id   "${SHARD}" \
+    --num-parts "${THREADS}" &
+done
+wait
 
+print_counts extracted "extracted"
+
+echo
+echo "=== 3) Parallel filter_data ==="
+for SHARD in $(seq 0 $((THREADS-1))); do
+# no keywords, no length filter, skip language → output ≡ input
+  python3 scripts/filter_data.py \
+    --input     data/extracted_thread${SHARD}.txt \
+    --output    data/filtered_thread${SHARD}.txt \
+    --skip-lang \
+    --part-id   "${SHARD}" \
+    --num-parts "${THREADS}" &
+done
+wait
+
+print_counts filtered "filtered"
+
+echo
+echo "=== 4) Parallel dedupe (fast SHA256) ==="
+for SHARD in $(seq 0 $((THREADS-1))); do
+  python3 scripts/dedupe.py \
+    --input     "${DATA_DIR}/filtered_thread${SHARD}.txt" \
+    --output    "${DATA_DIR}/deduped_thread${SHARD}.txt" \
+    --part-id   "${SHARD}" \
+    --num-parts "${THREADS}" &
+done
+wait
+
+print_counts deduped "deduped"
+
+echo
+echo "=== 5) Parallel scrub_pii ==="
+for SHARD in $(seq 0 $((THREADS-1))); do
+  python3 scripts/scrub_pii.py \
+    --input     "${DATA_DIR}/deduped_thread${SHARD}.txt" \
+    --output    "${DATA_DIR}/scrubbed_thread${SHARD}.txt" \
+    --workers   "${THREADS}" \
+    --part-id   "${SHARD}" \
+    --num-parts "${THREADS}" &
+done
+wait
+
+print_counts scrubbed "scrubbed"
+
+echo
+echo "=== 6) Parallel tokenize_and_pack ==="
+for SHARD in $(seq 0 $((THREADS-1))); do
+  python3 scripts/tokenize_and_pack.py \
+    --input      "${DATA_DIR}/scrubbed_thread${SHARD}.txt" \
+    --model      "${TOKENIZER_DIR}" \
+    --seq_len    "${SEQ_LEN}" \
+    --train_out  "${DATA_DIR}/train_thread${SHARD}.seq" \
+    --test_out   "${DATA_DIR}/test_thread${SHARD}.seq" \
+    --part-id    "${SHARD}" \
+    --num-parts  "${THREADS}" &
+done
+wait
+
+echo
+echo "=== train/test sequence file sizes ==="
+printf -- " type  | shard | lines | bytes\n"
+printf -- "------:|------:|------:|------:\n"
+for SHARD in $(seq 0 $((THREADS-1))); do
+  for TYPE in train test; do
+    F="${DATA_DIR}/${TYPE}_thread${SHARD}.seq"
+    if [[ -f $F ]]; then
+      LINES=$(wc -l < "$F" | xargs)
+      BYTES=$(wc -c < "$F" | xargs)
+    else
+      LINES=0; BYTES=0
+    fi
+    printf -- "%6s | %5d | %5d | %5d\n" "$TYPE" "$SHARD" "$LINES" "$BYTES"
+  done
+done
+
+echo
+echo "=== 7) Count tokens per thread and total ==="
+TOTAL=0
+for SHARD in $(seq 0 $((THREADS-1))); do
+  TOK=$(python3 scripts/count_tokens.py \
+    --input     "${DATA_DIR}/train_thread${SHARD}.seq" \
+    --part-id   "${SHARD}" \
+    --num-parts "${THREADS}")
+  echo " Thread ${SHARD}: ${TOK} tokens"
+  TOTAL=$((TOTAL + TOK))
+done
+echo "-----------------------------------"
+echo " Total tokens across all threads: ${TOTAL}"

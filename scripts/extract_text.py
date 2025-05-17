@@ -24,15 +24,16 @@ def main(input_file, output_file, workers, part_id, num_parts):
 
     # Partition the docs by index
     docs = [doc for i, doc in enumerate(docs) if i % num_parts == part_id]
-
+#    print(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>PRINTING DOCS ", docs)
     # Parallel extract
     with multiprocessing.Pool(processes=workers) as pool:
         results = pool.map(extract_html, docs)
-
     # Write out
     with open(output_file, 'w', encoding='utf-8') as fo:
         for text in results:
+#            print(">>>>>>>>>>>>>>>>>>>>GOING TO WRITE text.strip ", text.strip())
             fo.write(text.strip() + '\n---ENDDOC---\n')
+#            print(">>>>>>>>>>>>>>>>>>>>GOING TO WRITE done")
 
 if __name__ == '__main__':
     p = argparse.ArgumentParser()

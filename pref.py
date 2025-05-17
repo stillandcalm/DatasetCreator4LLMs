@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+set -e
+
+# 1) Create a tiny debug_data directory
+DEBUG=debug_data
+rm -rf $DEBUG && mkdir -p $DEBUG
+
+# 2) Raw HTML “shard” (we’ll pretend this came straight from the crawler)
+cat > $DEBUG/raw_html_thread0.txt << 'EOF'
+<html><body><h1>Doc 1</h1><p>Hello, world0!</p></body></html>
+<html><body><h1>Doc 1a</h1><p>Hello, whappyorld0!</p></body></html>
+---ENDDOC---
+<html><body><h1>Doc 2</h1><p>This page mentions an email0: alice@example.com</p></body></html>
+---ENDDOC---
+<html><body><h1>Doc 3</h1><p>Foo bar baz. Repeat foo bar0.</p></body></html>
+---ENDDOC---
+EOF
+
+# 3) Extract text (turn HTML → plain, one ENDDOC per chunk)
+echo "=== extract_text ==="
+python3 scripts/extract_text.py \
+  --input     $DEBUG/raw_html_thread0.txt \
+  --output    $DEBUG/extracted_thread0.txt \
+  --workers   1 \
+  --part-id   0 \
+  --num-parts 1
+
+# 4) Filter data (we’ll skip lang/keywords/min-len so filtered ≡ extracted)
+echo "=== filter_data ==="
+python3 scripts/filter_data.py \
+  --input     $DEBUG/extracted_thread0.txt \
+  --output    $DEBUG/filtered_thread0.txt \
+  --skip-lang \
+  --min-len   0 \
+  --part-id   0 \
+  --num-parts 1
+
+# 5) Deduplication (SHA256 fast path)
+#echo "=== dedupe ==="
+#python3 scripts/dedupe.py \
+#  --input     $DEBUG/filtered_thread0.txt \
+#  --output    $DEBUG/deduped_thread0.txt \
+#  --part-id   0 \
+#  --num-parts 1
+
+# 6) PII scrub
+#echo "=== scrub_pii ==="
+#python3 scripts/scrub_pii.py \
+#  --input     $DEBUG/deduped_thread0.txt \
+#  --output    $DEBUG/scrubbed_thread0.txt \
+#  --workers   1 \
+#  --part-id   0 \
+#  --num-parts 1
+
+# 7) Tokenize & pack (tiny seq_len so you can eyeball the .seq files)
+#echo "=== tokenize_and_pack ==="
+#python3 scripts/tokenize_and_pack.py \
+#  --input     $DEBUG/scrubbed_thread0.txt \
+#  --model     tokenizer.model \
+#  --seq_len   16 \
+#  --train_out $DEBUG/train_thread0.seq \
+#  --test_out  $DEBUG/test_thread0.seq \
+#  --part-id   0 \
+#  --num-parts 1 \
+#  --train-frac 0.5
+
+# 8) Count tokens
+echo "=== count_tokens ==="
+#python3 scripts/count_tokens.py \
+#  --input     $DEBUG/train_thread0.seq \
+#  --workers   1 \
+#  --part-id   0 \
+#  --num-parts 1
+#
+echo "‾‾‾‾‾‾‾‾‾‾"
+echo "Debug data directory is: $DEBUG/"
+

@@ -1,0 +1,7 @@
+<html><body><h1>Doc 1</h1><p>Hello, world0!</p></body></html>
+<html><body><h1>Doc 1a</h1><p>Hello, whappyorld0!</p></body></html>
+---ENDDOC---
+<html><body><h1>Doc 2</h1><p>This page mentions an email0: alice@example.com</p></body></html>
+---ENDDOC---
+<html><body><h1>Doc 3</h1><p>Foo bar baz. Repeat foo bar0.</p></body></html>
+---ENDDOC---
