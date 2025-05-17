@@ -138,7 +138,7 @@ Under `train/` you have:
 **Example:**
 
 ```bash
-deepseed --hostfile extras/hostfile train/train_llama3_full_ft.py \
+deepspeed --hostfile extras/hostfile train/train_llama3_full_ft.py \
   --model_name_or_path meta-llama/Meta-Llama-3-8B \
   --train_sequences data/train_thread*.seq \
   --output_dir output/ll3-8b-ft \
