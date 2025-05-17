@@ -52,7 +52,8 @@ This repository provides a complete end‑to‑end pipeline for:
 ---
 
 ## Setup (Multi‑Node SSH & Environment)
-##node0(master) node1(slave)
+```
+node0(master) node1(slave)
 passwd 
 cd /root
 python3 -m venv llama3
@@ -107,6 +108,8 @@ pip uninstall -y torch torchvision torchaudio deepspeed
 pip install --upgrade --index-url https://download.pytorch.org/whl/cu118 torch torchvision torchaudio
 python3 -c "import torch; print(torch.__version__, torch.version.cuda)"
 pip install deepspeed
+
+```
 
 ---
 
