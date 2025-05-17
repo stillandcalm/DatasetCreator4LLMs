@@ -157,6 +157,28 @@ deepspeed --hostfile hostfile train/train_llama3_full_ft.py \
 Once saved, convert checkpoint to HF format:
 
 ```bash
+
+deepspeed_config.json
+{
+  "zero_optimization": {
+    "stage": 2
+  },
+  "fp16": {
+    "enabled": true
+  },
+  "train_micro_batch_size_per_gpu": 1,
+  "train_batch_size": 16,
+  "optimizer": {
+    "type": "AdamW",
+    "params": {
+      "lr": 5e-5,
+      "betas": [0.9, 0.999],
+      "eps": 1e-8,
+      "weight_decay": 0.01
+    }
+  }
+}
+
 python train/modelcreate.py \
   --checkpoint output/ll3-8b-ft/checkpoint-xxx \
   --out_dir inference/llama3-8b-ft
