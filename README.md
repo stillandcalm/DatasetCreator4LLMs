@@ -170,7 +170,15 @@ deepspeed_config.json
 
 {
   "zero_optimization": {
-    "stage": 2
+    "stage": 2,
+    "offload_optimizer": {
+      "device": "cpu",
+      "pin_memory": true
+    },
+    "offload_param": {
+      "device": "cpu",
+      "pin_memory": true
+    }
   },
   "fp16": {
     "enabled": true
