@@ -166,6 +166,20 @@ Under `train/` you have:
 
 ```bash
 
+if you are on a H100 GPU node. No need to use deepspeed. Simply run the train command using the Huggingface trainer code (check single_node_h100_train.py in the train directory). Check the data directory argument (train_file data/train_thread0.seq). It already has the training file tokenized with a llama tokenizer.model
+
+python train/single_node_h100_train.py \
+  --model_name_or_path meta-llama/Meta-Llama-3-8B \
+  --train_file data/train_thread0.seq \
+  --output_dir output-h100 \
+  --per_device_train_batch_size 4 \
+  --gradient_accumulation_steps 1 \
+  --num_train_epochs 4 \
+  --learning_rate 5e-5 \
+  --max_seq_length 1024
+
+For Distributed training accross multiple nodes 
+
 deepspeed_config.json (for single A100 env). For multi GPU based training use the config file defined in my multi-node project
 
 {
