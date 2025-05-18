@@ -132,7 +132,7 @@ mkdir data
   --seeds seeds.txt \
   --domains domains.txt \
   --output-dir data \
-  --threads 1 \
+  --threads 1 \        #Start with 1 thread. This will simploy understanding the program. increase to 8 threads later for increased paralellism of data processing
   --max-pages 100000 \
   --delay 1.0
 ```
